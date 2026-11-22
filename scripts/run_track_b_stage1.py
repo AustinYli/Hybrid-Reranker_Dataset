@@ -321,8 +321,6 @@ def main() -> None:
                 checkpoint_path=checkpoint_path,
                 query_group_size=args.rerank_query_group_size,
             )
-            # Checkpoint resumes span invocations, so the complete amortized latency
-            # ledger is a better denominator than this invocation's wall clock.
             search_seconds = sum(latencies)
             device = str(model.device)
 

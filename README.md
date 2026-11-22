@@ -1,8 +1,8 @@
 # RAG Benchmark Harness
 
-This repo implements repeatable retrieval and RAG evaluation. Track A benchmarks BM25, exact dense retrieval, hybrid RRF, and cross-encoder reranking on BEIR. Track B adds evidence retrieval, local answer generation, faithfulness, and abstention evaluation on MultiHop-RAG.
+Repeatable retrieval and RAG evaluation. Track A benchmarks BM25, exact dense retrieval, hybrid RRF, and cross-encoder reranking on BEIR. Track B adds evidence retrieval, local answer generation, faithfulness, and abstention tests on MultiHop-RAG.
 
-The fixed grid is in `results/track_a_runs.csv`. See [RESULTS.md](RESULTS.md) for the findings, statistical qualifications, and decision log.
+The fixed grid is in `results/track_a_runs.csv`. [RESULTS.md](RESULTS.md) has the findings, statistical caveats, and decision log.
 
 ## Quick Start
 
@@ -13,7 +13,7 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-Run a tiny smoke test first. Smoke runs write to `results/smoke_runs.csv`, not the real benchmark table:
+Start with a small smoke test. Smoke runs write to `results/smoke_runs.csv`, not the main results table:
 
 ```bash
 python -m rag_bench.run --config configs/scifact_bm25_smoke.json
@@ -21,7 +21,7 @@ python -m rag_bench.run --config configs/scifact_bm25_smoke.json
 scripts/run_smoke.sh
 ```
 
-Then run the intended Track A baselines:
+Then the Track A BM25 baselines:
 
 ```bash
 python -m rag_bench.run --config configs/scifact_bm25.json
@@ -31,7 +31,7 @@ python -m rag_bench.run --config configs/fiqa_bm25.json
 scripts/run_track_a_bm25.sh
 ```
 
-Run the SciFact BM25 analyzer/parameter gate:
+SciFact BM25 analyzer and parameter check:
 
 ```bash
 python scripts/run_bm25_gate.py
@@ -47,7 +47,7 @@ python -m rag_bench.run --config configs/scifact_dense_minilm_rerank.json
 python -m rag_bench.run --config configs/scifact_hybrid_minilm_rerank.json
 ```
 
-Run the complete fixed grid and post-hoc sweeps:
+Full grid plus the fusion sweeps:
 
 ```bash
 python scripts/run_track_a_grid.py
@@ -57,7 +57,7 @@ python scripts/compare_rrf_k_sweep.py --samples 10000
 python scripts/compare_fusion_winners.py --samples 10000
 ```
 
-Reranker sweeps persist both ranked lists and per-query metrics, record the actual Torch device, and resume by skipping completed run names. Their `rerank_latency_p50_ms` and `rerank_latency_p95_ms` fields are directly measured; total query percentiles are labeled `component_percentile_sum` because they add the persisted base and reranker component percentiles:
+Reranker sweeps save the ranked lists and per-query metrics, record which Torch device was used, and skip runs that already finished. `rerank_latency_p50_ms` and `rerank_latency_p95_ms` are measured directly. The total query percentiles are labeled `component_percentile_sum` because they're the sum of the base and reranker percentiles:
 
 ```bash
 python scripts/run_rerank_sweep.py \
@@ -76,12 +76,12 @@ python scripts/compare_rerank_sweeps.py \
 
 ## Notes
 
-- BEIR corpora are already passage-like documents, so this track intentionally does not benchmark chunking.
-- Embeddings and BM25 indices are cached under `cache/` so repeated runs are much faster.
-- Dense retrieval defaults to exact NumPy inner-product search over L2-normalized embeddings. Set `retriever.index_backend` to `faiss` to use FAISS `IndexFlatIP`.
-- E5 and BGE model prefixes are applied automatically when their model names are detected.
-- Reranking is optional because it downloads a cross-encoder and is much more expensive than first-stage retrieval.
-- No model is trained or fine-tuned here. The included sweeps use BEIR test qrels, so selected optima are exploratory and should be validated on a held-out dataset or split before deployment.
+- BEIR documents are already passage-sized, so Track A doesn't test chunking.
+- Embeddings and BM25 indexes are cached under `cache/`, so repeat runs are much faster.
+- Dense retrieval uses exact NumPy inner product over L2-normalized embeddings by default. Set `retriever.index_backend` to `faiss` to use FAISS `IndexFlatIP`.
+- E5 and BGE query/passage prefixes are added automatically based on the model name.
+- Reranking is optional: it downloads a cross-encoder and is much slower than first-stage retrieval.
+- Nothing is trained or fine-tuned here. The sweeps are tuned on BEIR test qrels, so the best settings they find are exploratory and should be checked on a separate split before real use.
 
 ## Useful Config Fields
 
@@ -94,32 +94,32 @@ python scripts/compare_rerank_sweeps.py \
 - `retriever.analyzer`: `word-lower-v1`, `word-lower-stop-v1`, `word-lower-bigram-v1`, or `word-lower-stop-porter-v1`
 - `retriever.k1` / `retriever.b` / `retriever.epsilon`: BM25 parameters
 - `retriever.reranker_model`: CrossEncoder model name
-- `retriever.max_seq_length`: explicit truncation length for dense and reranker models
-- `retriever.normalize_embeddings`: makes exact inner product equivalent to cosine similarity
-- `metrics.cutoffs`: list of metric cutoffs, defaults to `[1, 5, 10, 100]`
+- `retriever.max_seq_length`: truncation length for dense and reranker models
+- `retriever.normalize_embeddings`: makes inner product the same as cosine similarity
+- `metrics.cutoffs`: metric cutoffs, default `[1, 5, 10, 100]`
 
 ## Output
 
-Each real run appends a row to `results/runs.csv` with config metadata, timing, artifact paths, and metrics such as:
+Each real run adds a row to `results/runs.csv` with the config, timings, artifact paths, and metrics such as:
 
 - `ndcg@10`
 - `recall@10`
 - `mrr@10`
 - `map@10`
 
-`map@k` follows the `pytrec_eval` `map_cut.k` convention: precision at relevant ranks up to `k`, divided by the full number of relevant documents for the query.
+`map@k` follows `pytrec_eval`'s `map_cut.k`: precision at each relevant rank up to `k`, divided by the total number of relevant documents for the query.
 
-The row also includes timing fields:
+Timing fields:
 
-- `load_seconds`: dataset loading and any first-time download/unzip
-- `index_seconds`: BM25 indexing or dense corpus embedding/cache loading
-- `search_seconds`: query-time retrieval/reranking work
+- `load_seconds`: dataset loading, including any first-time download and unzip
+- `index_seconds`: BM25 indexing, or embedding the corpus / loading it from cache
+- `search_seconds`: query-time retrieval and reranking
 - `throughput_ms_per_query`: `search_seconds / num_queries`
-- `query_latency_p50_ms` and `query_latency_p95_ms`: query-by-query latency when measured by the retriever
+- `query_latency_p50_ms` and `query_latency_p95_ms`: per-query latency, when the retriever measures it
 
-Full ranked outputs are written as JSONL under `results/artifacts/`, and per-query metric CSVs are written beside them.
+Ranked outputs are saved as JSONL under `results/artifacts/`, with per-query metric CSVs next to them.
 
-If metric code changes, recompute metrics from persisted rankings without rerunning retrieval:
+If the metric code changes, recompute metrics from the saved rankings without rerunning retrieval:
 
 ```bash
 python scripts/rescore_results.py results/track_a_runs.csv
@@ -127,7 +127,7 @@ python scripts/rescore_results.py results/track_a_runs.csv
 
 ## Comparing Runs
 
-Use persisted per-query metrics for paired bootstrap confidence intervals:
+Paired bootstrap confidence intervals from the saved per-query metrics:
 
 ```bash
 python -m rag_bench.compare \
@@ -137,9 +137,9 @@ python -m rag_bench.compare \
   --output results/comparisons.csv
 ```
 
-The test suite cross-checks nDCG, recall, and MAP against `pytrec_eval`, including a query with more relevant documents than the cutoff so the MAP denominator convention is exercised.
+The tests check nDCG, recall, and MAP against `pytrec_eval`, including a query with more relevant documents than the cutoff to cover the MAP denominator.
 
-To repeat that check over every persisted Track A ranking:
+To run the same check over every saved Track A ranking:
 
 ```bash
 python scripts/check_metrics_pytrec_eval.py
@@ -147,13 +147,13 @@ python scripts/check_metrics_pytrec_eval.py
 
 ## Track B: MultiHop-RAG
 
-Download and audit the public files directly from their authoritative Hugging Face repository. The data stays under ignored `data/`; the computed audit is tracked:
+Download and check the public files from the dataset's Hugging Face repo. The data goes in `data/` (git-ignored); the audit output is committed:
 
 ```bash
 python scripts/inspect_multihop_rag.py
 ```
 
-Run Stage 1 in dependency order. The runner checkpoints the expensive reranker under `cache/` and resumes it after interruption:
+Run Stage 1 in this order. The reranker step checkpoints to `cache/` and picks up where it left off if interrupted:
 
 ```bash
 python scripts/run_track_b_stage1.py --stage bm25
@@ -165,20 +165,18 @@ python scripts/check_track_b_evidence_metrics.py
 python scripts/analyze_track_b_retrieval.py
 ```
 
-The corpus contains full news articles, so Track B uses deterministic 256-word chunks with 64-word overlap and indexes `title`, `source`, and `published_at` alongside every chunk. It reports both source-document recall and stricter evidence-fact recall; `context_sufficiency@k` is one only when every annotated fact is present in the selected chunks. This is complete gold-evidence coverage, not an unconditional accuracy ceiling, because annotations may not enumerate every usable support path.
+The corpus is full news articles, so Track B splits them into 256-word chunks with 64-word overlap and indexes `title`, `source`, and `published_at` with every chunk. It reports both source-document recall and the stricter evidence-fact recall. `context_sufficiency@k` is 1 only when every annotated fact is in the selected chunks. That measures full coverage of the annotated evidence; it isn't a hard ceiling on accuracy, since a question might be answerable from evidence that wasn't annotated.
 
-MultiHop-RAG produces the opposite sparse/dense ordering from FiQA: BGE-base beats BM25 by 0.1622 nDCG@10 on FiQA but trails it by 0.1645 evidence recall@5 here. Almost every answerable MultiHop-RAG question names a gold publisher, exposing literal routing keys that favor lexical retrieval. A preregistered out-of-sample test of the Track A gap law was confirmed: frozen equal-weight `rrf_k=60` fusion lifts dense evidence recall@5 by 0.0998 `[0.0900, 0.1098]`, larger than all nine prior fusion lifts, while still remaining below BM25.
+On MultiHop-RAG, sparse and dense swap places compared with FiQA: BGE-base beats BM25 by 0.1622 nDCG@10 on FiQA but trails it by 0.1645 evidence recall@5 here. Almost every answerable question names the publisher of its evidence, which gives BM25 exact keywords to match. The Track A gap law was tested here with settings fixed in advance, and it held: equal-weight `rrf_k=60` fusion raises dense evidence recall@5 by 0.0998 `[0.0900, 0.1098]`, more than any of the nine earlier fusion gains, but still ends up below BM25.
 
-Install the pinned local generator and run the oracle-context gate before any retrieved-context generation:
+Install the local generator and run the oracle-context check before any generation with retrieved context:
 
 ```bash
 ollama pull qwen2.5:7b-instruct-q4_K_M
 python scripts/run_track_b_generation.py --mode oracle --max-queries 20
 ```
 
-Once the full oracle gate passes, run three repeats on the same stable 200-query
-held-out distribution used by retrieved-context evaluation, then vary only the
-retrieval run:
+Once the full oracle check passes, run three repeats on the same fixed 200-query held-out sample used for retrieved-context evaluation, changing only the retrieval run:
 
 ```bash
 python scripts/run_track_b_generation.py --mode retrieved \
@@ -202,12 +200,11 @@ python scripts/run_track_b_generation.py \
   --retriever-run-name multihop_bm25_stem_w256_o64
 ```
 
-The first 20 answerable questions are a frozen prompt-development slice because their raw outputs were inspected while fixing the response contract. Full generation runs exclude those IDs from their artifacts and record both the ID-set hash and evaluation-partition version; headline generation metrics therefore use 2,235 held-out answerable questions.
+The first 20 answerable questions were used to develop the prompt (their outputs were read while fixing the answer format), so full generation runs leave them out and record the ID-set hash and evaluation-partition version. Headline generation metrics use the remaining 2,235 answerable questions.
 
-The completed held-out oracle gate is 0.7955 EM and 0.8034 token F1. Three temperature-zero repeats on a stable 200-query held-out BM25-context sample produced identical prediction strings (0.000 answerable EM/F1 range), so no run averaging is required by the measured determinism gate. Oracle p50/p95 latency is 1.812/2.606 seconds per sequential local request. The summary flags and excludes 45 impossible Ollama component-duration ledgers while retaining every well-formed total request duration.
+The full held-out oracle run scores 0.7955 EM and 0.8034 token F1. Three temperature-0 repeats on the fixed 200-query BM25 sample gave identical outputs (0.000 EM/F1 range), so runs don't need averaging. Oracle p50/p95 latency is 1.812/2.606 seconds per local request, run one at a time. The summary flags and ignores the per-component timings of 45 Ollama responses where they were impossible, but keeps every valid total request time.
 
-Reanalyze response-format failures and attribute errors from the saved 200-query
-BM25 artifact without generating again:
+Re-check format failures and error causes from the saved 200-query BM25 run without generating again:
 
 ```bash
 python scripts/analyze_track_b_format.py \
@@ -219,29 +216,16 @@ python scripts/analyze_track_b_generation.py \
   --output results/track_b_failure_attribution_bm25_sample200.json
 ```
 
-Malformed outputs do not cause the oracle-to-BM25 gap: answerable malformed BM25
-responses score 0.5714 EM and contribute only 6 of 59 errors. Among those 59
-errors, 50 lack complete annotated evidence in the actual prompt and 9 remain
-wrong despite complete evidence. A true no-context control on the same hashed
-sample reaches only 0.2069 EM/F1, versus BM25's 0.6609/0.6648, so model memory
-does not make the retrieved-context experiment uninformative:
+Badly formatted answers aren't what separates oracle from BM25: malformed BM25 answers on answerable questions still score 0.5714 EM and account for only 6 of 59 errors. Of the 59 errors, 50 are missing some annotated evidence in the prompt and 9 are wrong even with all of it. With no context at all, the model reaches only 0.2069 EM/F1 on the same sample, against 0.6609/0.6648 for BM25, so memory alone doesn't explain the retrieved-context results:
 
 ```bash
 python scripts/run_track_b_generation.py \
   --mode closed_book --evaluation-sample-size 200 --repeat 1
 ```
 
-The matched 200-query E1 pilot scores 0.6609 EM for BM25, 0.6322 for BGE dense,
-and 0.6897 for BGE dense plus the BGE reranker. All aggregate intervals cross
-zero and none of the 24 aggregate/type EM/F1 comparisons survives Holm
-correction, so this pilot does not select a winner. Its 19-22% paired discordance
-does support the full run: the observed dense-to-reranker effect requires roughly
-960 answerable queries for 80% power at the conservative 0.05/24 threshold,
-below the 2,235 available.
+On the matched 200-query pilot, EM is 0.6609 for BM25, 0.6322 for BGE dense, and 0.6897 for BGE dense plus the BGE reranker. Every aggregate interval crosses zero and none of the 24 aggregate/type EM/F1 comparisons survives Holm correction, so the pilot doesn't pick a winner. The 19–22% of questions where systems disagree does justify the full run: detecting the dense-to-reranker difference with 80% power at 0.05/24 needs about 960 answerable questions, and 2,235 are available.
 
-After generating with BM25, dense, and dense plus reranker, compare the exact
-generation run names. The comparator reports aggregate, comparison, inference,
-and temporal results as one 24-test Holm-corrected family:
+After generating with BM25, dense, and dense plus reranker, compare the runs by name. The comparison covers aggregate, comparison, inference, and temporal results as one 24-test Holm family:
 
 ```bash
 python scripts/compare_track_b_generation.py \
@@ -252,8 +236,7 @@ python scripts/analyze_track_b_generation.py \
   --output results/track_b_failure_attribution.json
 ```
 
-Position sensitivity uses three runs over the same retriever and fixed chunk set,
-followed by one six-test Holm family:
+The position test uses three runs with the same retriever and chunk set, then one six-test Holm family:
 
 ```bash
 python scripts/run_track_b_generation.py --mode retrieved \
@@ -269,22 +252,16 @@ python scripts/compare_track_b_positions.py \
   --ordered-run-names <first-run>,<middle-run>,<last-run>
 ```
 
-The abstention intervention requires matched retrieved runs with the instruction
-off and on. Its analyzer verifies that the saved prompt templates differ only by
-the frozen instruction, then jointly corrects the null-abstention and answerable
-false-abstention tests. Use the same frozen 300-query hash sample for both runs:
+The abstention test needs two retrieved runs, one with the abstention instruction off and one with it on. The script checks that the saved prompts differ only by that instruction, then corrects the null-question abstention test and the answerable false-abstention test together. Use the same 300-query sample for both runs:
 
 ```bash
 python scripts/compare_track_b_abstention.py \
   --off-run-name <instruction-off-run> --on-run-name <instruction-on-run>
 ```
 
-`--evaluation-sample-size` is reserved for secondary experiments, uses a
-versioned SHA-256 sampler, and records the seed and selected-ID hash. The full E1
-retriever comparison does not use it.
+`--evaluation-sample-size` is only for the secondary experiments. It uses a versioned SHA-256 sampler and records the seed and the hash of the selected IDs. The full E1 retriever comparison doesn't use it.
 
-Run the preregistered G1 context-depth sweep on one paired 300-query development
-sample. The depth and total rendered-context budget increase together:
+The G1 context-depth sweep runs on one paired 300-query dev sample. Depth and the total context budget go up together:
 
 ```bash
 python scripts/run_track_b_generation.py --mode retrieved \
@@ -308,21 +285,11 @@ python scripts/compare_track_b_depths.py \
   --ordered-run-names <k3-run>,<k5-run>,<k10-run>,<k20-run>
 ```
 
-The comparator reports actual evidence present in each saved prompt alongside EM
-and F1, with separate 24-test Holm families for answer quality and evidence
-coverage. Confirmatory full E1 runs must exclude the depth-selection sample with
-`--exclude-evaluation-sample-size 300 --exclude-evaluation-sample-seed 13`.
-The 16,384-token window is an amendment made after an 8,192-token feasibility
-probe exposed silent truncation at k=20; all four compared arms use the amendment.
+The comparison reports how much evidence actually made it into each saved prompt alongside EM and F1, with separate 24-test Holm families for answer quality and evidence coverage. Full E1 runs must leave out the depth-selection sample with `--exclude-evaluation-sample-size 300 --exclude-evaluation-sample-seed 13`. The 16,384-token window was raised after a test at 8,192 tokens showed the k=20 prompts were being silently truncated; all four runs use the larger window.
 
-G1 selects k=10 for held-out confirmation. On 264 answerable questions, EM rises
-from 0.6742 at k=5 to 0.7500 at k=10, a paired +0.0758
-`[0.0341, 0.1212]` that survives the 24-test answer-quality Holm family. k=20
-raises context sufficiency further from 0.2992 to 0.4545 but does not improve EM
-over k=10 (-0.0076 `[-0.0530, 0.0379]`) and doubles p50 latency from 14.36 to
-29.23 seconds. This is a development-slice selection, not a final E1 estimate.
+G1 picks k=10. On 264 answerable questions, EM goes from 0.6742 at k=5 to 0.7500 at k=10, a paired +0.0758 `[0.0341, 0.1212]` that survives the 24-test Holm correction. k=20 raises context sufficiency from 0.2992 to 0.4545 but doesn't beat k=10 on EM (-0.0076 `[-0.0530, 0.0379]`) and doubles p50 latency from 14.36 to 29.23 seconds. This was chosen on the dev sample and isn't a final E1 number.
 
-Generation artifacts include the exact rendered context and its hash, answer, prompt hash, context-builder and response-parser versions, upstream retrieval artifact hash, model tag and digest, quantization, runtime, seed, temperature, context window, 96-token output cap, EM/F1, and abstention decision. The NLI scorer emits a threshold sensitivity curve and accepts a hand-labeled calibration CSV:
+Each generation artifact records the exact context and its hash, the answer, the prompt hash, the context-builder and answer-parser versions, the hash of the retrieval run it used, the model tag and digest, quantization, runtime, seed, temperature, context window, the 96-token output limit, EM/F1, and whether it abstained. The NLI scorer outputs results across a range of thresholds and accepts a hand-labeled calibration CSV:
 
 ```bash
 python scripts/score_track_b_faithfulness.py \
@@ -333,19 +300,11 @@ python scripts/sample_faithfulness_calibration.py \
   --claim-artifact results/track_b_generation_artifacts/<run>.claims.jsonl
 ```
 
-The calibration CSV deliberately omits the NLI score and includes the question,
-claim, and full context needed to assign each `human_supported` label. Do not
-quote a headline faithfulness rate until those 50 labels and Cohen's kappa are
-present. The first uncalibrated pass reports 0.6865 unsupported oracle claims
-and 0.8734 unsupported BM25 claims at threshold 0.5. Those are diagnostic values,
-not findings: the oracle rate fails a face-validity check, and the current
-single-block premise construction cannot directly support composite claims that
-join facts across blocks. The persisted threshold curves make that failure
-auditable while calibration remains open.
+The calibration CSV leaves out the NLI score and includes the question, claim, and full context needed to fill in each `human_supported` label. Don't report a faithfulness rate until those 50 labels and Cohen's kappa are in. The first uncalibrated pass marks 0.6865 of oracle claims and 0.8734 of BM25 claims as unsupported at threshold 0.5. Treat these as diagnostics only: the oracle number is clearly too high, and the current setup checks each claim against one block at a time, so claims that combine facts from several blocks can't be supported. The saved threshold curves show this until calibration is done.
 
-Retrieved generation defaults to five 256-word chunks and a strict 1,280-word rendered-context budget that includes block labels and retrieval metadata. Body words are allocated across the fixed chunk set independently of display order. For chunking experiments, raise `--retrieved-top-k` while keeping `--max-context-words 1280`; for position sensitivity, repeat the same run with `--evidence-position first`, `middle`, and `last`.
+Retrieved generation defaults to five 256-word chunks and a hard 1,280-word context budget, counting block labels and retrieval metadata. Body words are split across the chunk set the same way regardless of display order. For chunking experiments, raise `--retrieved-top-k` and keep `--max-context-words 1280`. For the position test, repeat the same run with `--evidence-position first`, `middle`, and `last`.
 
-E5 supports fixed, paragraph-structural, and BGE-based semantic segmentation. Non-fixed strategies require zero overlap; semantic boundaries are persisted and hash-verified. Run each retrieval configuration first, then use rank-order greedy packing so all four variants consume the same total rendered-context budget:
+E5 supports fixed, paragraph-based, and BGE-based semantic chunking. The non-fixed strategies need zero overlap. Semantic boundaries are saved and checked by hash. Run each retrieval config first, then use greedy packing in rank order so all four variants use the same total context budget:
 
 ```bash
 python scripts/run_track_b_stage1.py --stage bm25 --overlap-words 0
@@ -364,4 +323,4 @@ python scripts/compare_track_b_chunking.py \
   --candidate-run-names <no-overlap-run>,<structural-run>,<semantic-run>
 ```
 
-See [TRACK_B.md](TRACK_B.md) for metric definitions, gates, and current findings.
+[TRACK_B.md](TRACK_B.md) has the metric definitions, checks, and current results.
